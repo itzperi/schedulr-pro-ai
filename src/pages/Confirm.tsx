@@ -28,9 +28,69 @@ const Confirm = () => {
     e.preventDefault();
     setIsSubmitting(true);
 
-    // Simulate API call
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      // Save appointment to database
+      const { supabase } = await import("@/integrations/supabase/client");
+      
+      const appointmentData = {
+        consultant_id: consultant.id,
+        consultant_name: consultant.name,
+        patient_name: formData.name,
+        patient_phone: formData.phone,
+        patient_email: formData.email || null,
+        appointment_date: format(date, "yyyy-MM-dd"),
+        appointment_time: time,
+        notes: formData.notes || null,
+      };
+
+      const { data: appointment, error: dbError } = await supabase
+        .from("appointments")
+        .insert(appointmentData)
+        .select()
+        .single();
+
+      if (dbError) {
+        console.error("Database error:", dbError);
+        toast({
+          title: "Error",
+          description: "Failed to save appointment. Please try again.",
+          variant: "destructive",
+        });
+        setIsSubmitting(false);
+        return;
+      }
+
+      console.log("Appointment saved:", appointment);
+
+      // Send WhatsApp notification
+      const { data: whatsappResult, error: whatsappError } = await supabase.functions.invoke(
+        "send-whatsapp",
+        {
+          body: {
+            to: formData.phone,
+            consultantName: consultant.name,
+            patientName: formData.name,
+            date: format(date, "EEEE, MMMM d, yyyy"),
+            time: time,
+          },
+        }
+      );
+
+      if (whatsappError) {
+        console.error("WhatsApp error:", whatsappError);
+        // Still navigate to success even if WhatsApp fails
+        toast({
+          title: "Appointment Confirmed",
+          description: "Appointment saved but WhatsApp notification may have failed.",
+        });
+      } else {
+        console.log("WhatsApp sent:", whatsappResult);
+        toast({
+          title: "Success!",
+          description: "Appointment confirmed and WhatsApp notification sent!",
+        });
+      }
+
       navigate("/success", {
         state: {
           consultant,
@@ -39,7 +99,16 @@ const Confirm = () => {
           ...formData,
         },
       });
-    }, 1500);
+    } catch (error) {
+      console.error("Error submitting appointment:", error);
+      toast({
+        title: "Error",
+        description: "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   if (!consultant || !date || !time) {
